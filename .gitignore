@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Test results
+test-results/
+playwright-report/
+
+# Artifacts (generated during test runs, can be regenerated)
+artifacts/
+.artifacts/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# IDE
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Build/Dist
+dist/
+build/
+out/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Browser cache
+.http-server-cwd

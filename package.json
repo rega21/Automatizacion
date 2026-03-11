@@ -1,0 +1,22 @@
+{
+  "name": "bug-hunter-visual-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Visual web bug corroboration with Playwright UI and trace viewer",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:trace": "playwright test --trace on",
+    "show:report": "playwright show-report",
+    "hunter": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1",
+    "hunter:quick": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode quick",
+    "hunter:ui": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode ui",
+    "hunter:report": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode report",
+    "serve:report": "powershell -ExecutionPolicy Bypass -File ./scripts/serve-report.ps1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/node": "^25.4.0"
+  }
+}
