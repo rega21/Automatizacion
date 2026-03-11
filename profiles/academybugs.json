@@ -1,0 +1,37 @@
+{
+  "id": "academybugs",
+  "defaultUrl": "https://academybugs.com/",
+  "homeChecks": [
+    {
+      "step": "Examples section text is visible",
+      "kind": "css",
+      "name": "text=Examples of Bugs",
+      "optional": true
+    }
+  ],
+  "navigationActions": [
+    {
+      "step": "Open Types of Bugs page",
+      "kind": "roleLink",
+      "name": "Types of Bugs"
+    },
+    {
+      "step": "Open Find Bugs page",
+      "kind": "roleLink",
+      "name": "Find Bugs"
+    },
+    {
+      "step": "Open Report Bugs page",
+      "kind": "roleLink",
+      "name": "Report Bugs"
+    },
+    {
+      "step": "Return to Examples page",
+      "kind": "roleLink",
+      "name": "Examples of Bugs",
+      "exact": false,
+      "optional": true
+    }
+  ],
+  "utilityActions": []
+}

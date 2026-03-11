@@ -1,0 +1,54 @@
+{
+  "id": "my-new-site",
+  "defaultUrl": "https://mi-app.com/",
+  "homeChecks": [
+    {
+      "step": "Validate home heading",
+      "kind": "roleHeading",
+      "name": "Inicio",
+      "exact": false,
+      "optional": true
+    }
+  ],
+  "navigationActions": [
+    {
+      "step": "Open products page",
+      "kind": "roleLink",
+      "name": "Productos",
+      "exact": false,
+      "optional": true
+    },
+    {
+      "step": "Open contact page",
+      "kind": "roleLink",
+      "name": "Contacto",
+      "exact": false,
+      "optional": true
+    }
+  ],
+  "utilityActions": [
+    {
+      "step": "Open menu",
+      "kind": "roleButton",
+      "name": "Menu",
+      "exact": false,
+      "optional": true,
+      "closeWithEscape": true
+    },
+    {
+      "step": "Open search",
+      "kind": "roleButton",
+      "name": "Buscar",
+      "exact": false,
+      "optional": true,
+      "closeWithEscape": true
+    }
+  ],
+  "mutationAction": {
+    "step": "Submit primary CTA",
+    "kind": "roleButton",
+    "name": "Enviar",
+    "exact": false,
+    "optional": true
+  }
+}

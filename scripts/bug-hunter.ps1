@@ -1,9 +1,65 @@
 param(
-  [string]$Url = 'https://fobalfoca5.vercel.app/',
+  [string]$Url = '',
+  [string]$Profile = '',
+  [string]$ProfileFile = '',
   [ValidateSet('menu', 'quick', 'ui', 'report')]
   [string]$Mode = 'menu',
   [switch]$OpenReportAfterScan
 )
+
+function Resolve-TargetUrl([string]$TargetUrl) {
+  if (-not [string]::IsNullOrWhiteSpace($TargetUrl)) {
+    return $TargetUrl
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:TARGET_URL)) {
+    return $env:TARGET_URL
+  }
+
+  return ''
+}
+
+function Resolve-TargetProfile([string]$TargetProfile) {
+  if (-not [string]::IsNullOrWhiteSpace($TargetProfile)) {
+    return $TargetProfile
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:TARGET_PROFILE)) {
+    return $env:TARGET_PROFILE
+  }
+
+  return 'fobalfoca'
+}
+
+function Resolve-TargetProfileFile([string]$TargetProfileFile) {
+  if (-not [string]::IsNullOrWhiteSpace($TargetProfileFile)) {
+    return $TargetProfileFile
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:TARGET_PROFILE_FILE)) {
+    return $env:TARGET_PROFILE_FILE
+  }
+
+  return ''
+}
+
+function Set-TargetUrlEnv([string]$TargetUrl) {
+  if ([string]::IsNullOrWhiteSpace($TargetUrl)) {
+    Remove-Item Env:TARGET_URL -ErrorAction SilentlyContinue
+    return
+  }
+
+  $env:TARGET_URL = $TargetUrl
+}
+
+function Set-ProfileFileEnv([string]$TargetProfileFile) {
+  if ([string]::IsNullOrWhiteSpace($TargetProfileFile)) {
+    Remove-Item Env:TARGET_PROFILE_FILE -ErrorAction SilentlyContinue
+    return
+  }
+
+  $env:TARGET_PROFILE_FILE = $TargetProfileFile
+}
 
 function Show-Banner {
   Write-Host ''
@@ -75,16 +131,41 @@ function Open-LocalReport {
   Start-Process $fileUrl
 }
 
-function Run-QuickScan([string]$TargetUrl, [bool]$ShouldPromptForReport) {
-  $env:TARGET_URL = $TargetUrl
-  Write-Host "Escaneando: $TargetUrl" -ForegroundColor Cyan
+function Run-QuickScan([string]$TargetUrl, [string]$TargetProfile, [string]$TargetProfileFile, [bool]$ShouldPromptForReport) {
+  $effectiveUrl = Resolve-TargetUrl -TargetUrl $TargetUrl
+  $effectiveProfile = Resolve-TargetProfile -TargetProfile $TargetProfile
+  $effectiveProfileFile = Resolve-TargetProfileFile -TargetProfileFile $TargetProfileFile
+
+  # If a profile file is provided and URL was not explicitly passed, prefer profile defaultUrl.
+  if ((-not [string]::IsNullOrWhiteSpace($effectiveProfileFile)) -and [string]::IsNullOrWhiteSpace($TargetUrl)) {
+    $effectiveUrl = ''
+  }
+
+  Set-TargetUrlEnv -TargetUrl $effectiveUrl
+  $env:TARGET_PROFILE = $effectiveProfile
+  Set-ProfileFileEnv -TargetProfileFile $effectiveProfileFile
+
+  $urlLabel = if ([string]::IsNullOrWhiteSpace($effectiveUrl)) { 'auto (desde perfil)' } else { $effectiveUrl }
+  Write-Host "Escaneando: $urlLabel (perfil: $effectiveProfile)" -ForegroundColor Cyan
+
+  # Avoid showing stale data from previous runs when current run fails early.
+  Remove-Item 'artifacts/telemetry.json' -ErrorAction SilentlyContinue
+  Remove-Item 'artifacts/report.html' -ErrorAction SilentlyContinue
+
   npm run test:trace
+  $testExitCode = $LASTEXITCODE
 
   Print-TelemetrySummary
 
+  if ($testExitCode -ne 0) {
+    Write-Host ''
+    Write-Host 'El escaneo fallo. Se omitira abrir reporte HTML para evitar datos antiguos.' -ForegroundColor Yellow
+    return $false
+  }
+
   if ($OpenReportAfterScan) {
     Open-LocalReport
-    return
+    return $true
   }
 
   if ($ShouldPromptForReport) {
@@ -94,21 +175,37 @@ function Run-QuickScan([string]$TargetUrl, [bool]$ShouldPromptForReport) {
       Open-LocalReport
     }
   }
+
+  return $true
 }
 
-function Run-UIMode([string]$TargetUrl) {
-  $env:TARGET_URL = $TargetUrl
-  Write-Host "Modo UI para: $TargetUrl" -ForegroundColor Cyan
+function Run-UIMode([string]$TargetUrl, [string]$TargetProfile, [string]$TargetProfileFile) {
+  $effectiveUrl = Resolve-TargetUrl -TargetUrl $TargetUrl
+  $effectiveProfile = Resolve-TargetProfile -TargetProfile $TargetProfile
+  $effectiveProfileFile = Resolve-TargetProfileFile -TargetProfileFile $TargetProfileFile
+
+  # If a profile file is provided and URL was not explicitly passed, prefer profile defaultUrl.
+  if ((-not [string]::IsNullOrWhiteSpace($effectiveProfileFile)) -and [string]::IsNullOrWhiteSpace($TargetUrl)) {
+    $effectiveUrl = ''
+  }
+
+  Set-TargetUrlEnv -TargetUrl $effectiveUrl
+  $env:TARGET_PROFILE = $effectiveProfile
+  Set-ProfileFileEnv -TargetProfileFile $effectiveProfileFile
+
+  $urlLabel = if ([string]::IsNullOrWhiteSpace($effectiveUrl)) { 'auto (desde perfil)' } else { $effectiveUrl }
+  Write-Host "Modo UI para: $urlLabel (perfil: $effectiveProfile)" -ForegroundColor Cyan
   npm run test:ui
 }
 
 Show-Banner
 
 if ($Mode -eq 'quick') {
-  $env:TARGET_URL = $Url
-  Write-Host "Escaneando: $Url" -ForegroundColor Cyan
-  npm run test:trace
-  Print-TelemetrySummary
+  $scanOk = Run-QuickScan -TargetUrl $Url -TargetProfile $Profile -TargetProfileFile $ProfileFile -ShouldPromptForReport $false
+  if (-not $scanOk) {
+    exit 1
+  }
+
   Write-Host ''
   Write-Host 'Abriendo reporte visual...' -ForegroundColor Cyan
   Open-LocalReport
@@ -116,7 +213,7 @@ if ($Mode -eq 'quick') {
 }
 
 if ($Mode -eq 'ui') {
-  Run-UIMode -TargetUrl $Url
+  Run-UIMode -TargetUrl $Url -TargetProfile $Profile -TargetProfileFile $ProfileFile
   exit 0
 }
 
@@ -125,9 +222,24 @@ if ($Mode -eq 'report') {
   exit 0
 }
 
-$selectedUrl = Read-Host "URL objetivo (Enter para default: $Url)"
+$defaultUrl = Resolve-TargetUrl -TargetUrl $Url
+$defaultUrlLabel = if ([string]::IsNullOrWhiteSpace($defaultUrl)) { 'auto (desde perfil)' } else { $defaultUrl }
+$selectedUrl = Read-Host "URL objetivo (Enter para default: $defaultUrlLabel)"
 if ([string]::IsNullOrWhiteSpace($selectedUrl)) {
-  $selectedUrl = $Url
+  $selectedUrl = $defaultUrl
+}
+
+$defaultProfile = Resolve-TargetProfile -TargetProfile $Profile
+$selectedProfile = Read-Host "Perfil de selectores (Enter para default: $defaultProfile)"
+if ([string]::IsNullOrWhiteSpace($selectedProfile)) {
+  $selectedProfile = $defaultProfile
+}
+
+$defaultProfileFile = Resolve-TargetProfileFile -TargetProfileFile $ProfileFile
+$defaultProfileFileLabel = if ([string]::IsNullOrWhiteSpace($defaultProfileFile)) { 'ninguno' } else { $defaultProfileFile }
+$selectedProfileFile = Read-Host "Archivo de perfil JSON (Enter para default: $defaultProfileFileLabel)"
+if ([string]::IsNullOrWhiteSpace($selectedProfileFile)) {
+  $selectedProfileFile = $defaultProfileFile
 }
 
 Write-Host ''
@@ -138,9 +250,11 @@ Write-Host '3) Abrir ultimo reporte visual'
 $choice = Read-Host 'Opcion'
 
 switch ($choice) {
-  '2' { Run-UIMode -TargetUrl $selectedUrl }
+  '2' { Run-UIMode -TargetUrl $selectedUrl -TargetProfile $selectedProfile -TargetProfileFile $selectedProfileFile }
   '3' { Open-LocalReport }
-  default { Run-QuickScan -TargetUrl $selectedUrl -ShouldPromptForReport $true }
+  default {
+    Run-QuickScan -TargetUrl $selectedUrl -TargetProfile $selectedProfile -TargetProfileFile $selectedProfileFile -ShouldPromptForReport $true
+  }
 }
 
 exit 0

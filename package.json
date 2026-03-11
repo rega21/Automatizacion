@@ -13,6 +13,8 @@
     "hunter:quick": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode quick",
     "hunter:ui": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode ui",
     "hunter:report": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode report",
+    "academy": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode quick -Profile academybugs -ProfileFile profiles/academybugs.json",
+    "academy:ui": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode ui -Profile academybugs -ProfileFile profiles/academybugs.json",
     "serve:report": "powershell -ExecutionPolicy Bypass -File ./scripts/serve-report.ps1"
   },
   "devDependencies": {

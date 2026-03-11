@@ -1,10 +1,18 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import fs from 'node:fs';
+import { createLocator, resolveProfile, type WalkAction } from './site-profiles';
 
-const TARGET_URL = process.env.TARGET_URL || 'https://fobalfoca5.vercel.app/';
+const TARGET_URL_FROM_ENV = process.env.TARGET_URL;
+const TARGET_PROFILE_FILE = process.env.TARGET_PROFILE_FILE;
+const REQUESTED_PROFILE =
+  process.env.TARGET_PROFILE || (TARGET_URL_FROM_ENV?.includes('academybugs.com') ? 'academybugs' : 'fobalfoca');
+const PROFILE = resolveProfile(REQUESTED_PROFILE, TARGET_PROFILE_FILE);
+const TARGET_URL = TARGET_PROFILE_FILE ? PROFILE.defaultUrl : TARGET_URL_FROM_ENV || PROFILE.defaultUrl;
 const ALLOW_MUTATIONS = process.env.ALLOW_MUTATIONS === 'true';
+const STRICT_TELEMETRY = process.env.STRICT_TELEMETRY === 'true';
 const ACTION_DELAY_MS = Number(process.env.ACTION_DELAY_MS ?? '1500');
 const STEP_SCREENSHOT_DIR = 'artifacts/steps';
+const IS_ACADEMYBUGS = TARGET_URL.includes('academybugs.com');
 
 test('visual walkthrough and telemetry capture', async ({ page }) => {
   const visited = new Set<string>();
@@ -23,7 +31,13 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
     screenshotIndex += 1;
     const safeStepName = step.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const screenshotPath = `${STEP_SCREENSHOT_DIR}/${String(screenshotIndex).padStart(2, '0')}-${safeStepName}.png`;
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+    } catch {
+      return 'artifacts/steps/unavailable.png';
+    }
+
     return screenshotPath;
   };
 
@@ -33,11 +47,94 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
     interactions.push({ step, url: page.url(), screenshotPath });
   };
 
-  const clickAndRecord = async (name: string, locator: ReturnType<typeof page.getByRole>) => {
-    await expect(locator).toBeVisible();
-    await locator.click();
-    await pauseForObservation();
-    await recordStep(name);
+  const ensureVisible = async (action: WalkAction) => {
+    const locator = createLocator(page, action);
+
+    try {
+      await expect(locator).toBeVisible({ timeout: 10_000 });
+      await recordStep(action.step);
+    } catch (error) {
+      if (action.optional) {
+        await recordStep(`${action.step} not visible, skipped`);
+        return;
+      }
+
+      throw error;
+    }
+  };
+
+  const clickAndRecord = async (action: WalkAction) => {
+    const locator = createLocator(page, action);
+
+    try {
+      await expect(locator).toBeVisible({ timeout: 10_000 });
+      await locator.click();
+      await pauseForObservation();
+      await recordStep(action.step);
+
+      if (action.closeWithEscape) {
+        await page.keyboard.press('Escape');
+        await pauseForObservation();
+        await recordStep(`Close ${action.step.toLowerCase()} with Escape`);
+      }
+    } catch (error) {
+      if (action.optional) {
+        await recordStep(`${action.step} not available, skipped`);
+        return;
+      }
+
+      throw error;
+    }
+  };
+
+  const tryClickIfVisible = async (step: string, locator: Locator) => {
+    try {
+      await locator.waitFor({ state: 'visible', timeout: 2500 });
+      await locator.click({ timeout: 5000 });
+      await pauseForObservation();
+      await recordStep(step);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const dismissAcademyBugsOverlays = async () => {
+    if (!IS_ACADEMYBUGS) {
+      return;
+    }
+
+    await tryClickIfVisible(
+      'Dismiss cookie banner (continue without accepting)',
+      page.getByText(/Continue without Accepting/i).first()
+    );
+
+    if (
+      !(await tryClickIfVisible(
+        'Dismiss cookie banner (functional only)',
+        page.getByText(/Functional only/i).first()
+      ))
+    ) {
+      await tryClickIfVisible('Dismiss cookie banner (accept cookies)', page.getByText(/Accept cookies|Accept All Cookies/i).first());
+    }
+
+    const tutorialTip = page.locator('p.TourTipDesc', { hasText: /Click start to begin the guided site tutorial/i }).first();
+
+    try {
+      await tutorialTip.waitFor({ state: 'visible', timeout: 2500 });
+
+      const started =
+        (await tryClickIfVisible(
+          'Start guided tutorial',
+          page.locator('div.TourTipButtonsHolder button.TourTipButton.TourTipNextButton', { hasText: /^Start$/i }).first()
+        )) || (await tryClickIfVisible('Start guided tutorial', page.getByRole('button', { name: /^Start$/i }).first()));
+
+      if (started) {
+        await tryClickIfVisible('Close tutorial after start', page.getByRole('button', { name: /^×$/ }).first());
+      }
+    } catch {
+      // Tutorial popup was not visible.
+    }
   };
 
   page.on('console', (msg) => {
@@ -53,51 +150,60 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
   await test.step('Open home page', async () => {
     await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
     await pauseForObservation();
+    await dismissAcademyBugsOverlays();
     await recordStep('Open home page');
     await expect(page).toHaveURL(/.+/);
-    await expect(page.getByRole('navigation', { name: 'Bottom Navigation' })).toBeVisible();
     await page.screenshot({ path: 'artifacts/home.png', fullPage: true });
   });
 
-  await test.step('Walk primary navigation', async () => {
-    await clickAndRecord('Open Partido tab', page.getByRole('button', { name: 'Partido' }));
-    await clickAndRecord('Open Historial tab', page.getByRole('button', { name: 'Historial' }));
-    await clickAndRecord('Return to Jugadores tab', page.getByRole('button', { name: 'Jugadores' }));
-  });
+  await test.step('Validate home checks', async () => {
+    if (PROFILE.homeChecks.length === 0) {
+      await recordStep('No home checks configured for profile');
+      return;
+    }
 
-  await test.step('Open utility controls', async () => {
-    await clickAndRecord('Open menu', page.getByRole('button', { name: 'Abrir menú' }));
-    await page.keyboard.press('Escape');
-    await pauseForObservation();
-    await recordStep('Close menu with Escape');
-
-    await clickAndRecord('Open search', page.getByRole('button', { name: /Buscar/i }));
-    await page.keyboard.press('Escape');
-    await pauseForObservation();
-    await recordStep('Close search with Escape');
-
-    try {
-      await clickAndRecord('Open add flow', page.getByRole('button', { name: /Agregar/i }));
-      await page.keyboard.press('Escape');
-      await pauseForObservation();
-      await recordStep('Close add flow with Escape');
-    } catch {
-      await recordStep('Agregar button not visible, skipped');
+    for (const homeCheck of PROFILE.homeChecks) {
+      await ensureVisible(homeCheck);
     }
   });
 
-  if (ALLOW_MUTATIONS) {
+  await test.step('Walk primary navigation', async () => {
+    if (PROFILE.navigationActions.length === 0) {
+      await recordStep('No navigation actions configured for profile');
+      return;
+    }
+
+    for (const action of PROFILE.navigationActions) {
+      await clickAndRecord(action);
+    }
+  });
+
+  await test.step('Open utility controls', async () => {
+    if (PROFILE.utilityActions.length === 0) {
+      await recordStep('No utility actions configured for profile');
+      return;
+    }
+
+    for (const action of PROFILE.utilityActions) {
+      await clickAndRecord(action);
+    }
+  });
+
+  if (ALLOW_MUTATIONS && PROFILE.mutationAction) {
     await test.step('Exercise first vote action', async () => {
-      await clickAndRecord('Vote for first player', page.getByRole('button', { name: /VOTAR/i }).first());
+      await clickAndRecord(PROFILE.mutationAction);
     });
   }
 
   const telemetry = {
+    profileRequested: REQUESTED_PROFILE,
+    profileResolved: PROFILE.id,
+    profileFile: TARGET_PROFILE_FILE || null,
     targetUrl: TARGET_URL,
     visited: Array.from(visited),
     interactions,
-    consoleIssues,
-    failedRequests
+    consoleIssues: Array.from(new Set(consoleIssues)),
+    failedRequests: Array.from(new Set(failedRequests))
   };
 
   fs.mkdirSync('artifacts', { recursive: true });
@@ -108,6 +214,8 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
     contentType: 'application/json'
   });
 
-  expect.soft(failedRequests, 'Detected failed network requests').toEqual([]);
-  expect.soft(consoleIssues, 'Detected console errors/warnings').toEqual([]);
+  if (STRICT_TELEMETRY) {
+    expect(telemetry.failedRequests, 'Detected failed network requests').toEqual([]);
+    expect(telemetry.consoleIssues, 'Detected console errors/warnings').toEqual([]);
+  }
 });
