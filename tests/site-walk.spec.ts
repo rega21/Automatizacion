@@ -118,23 +118,22 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
       await tryClickIfVisible('Dismiss cookie banner (accept cookies)', page.getByText(/Accept cookies|Accept All Cookies/i).first());
     }
 
-    const tutorialTip = page.locator('p.TourTipDesc', { hasText: /Click start to begin the guided site tutorial/i }).first();
-
+    // Close the tutorial via JS (calls the same jQuery.tourTip.close() as the × button)
+    // and remove the blocking canvas overlay if present.
+    // Wait up to 3s for the tutorial canvas to appear, then dismiss immediately.
     try {
-      await tutorialTip.waitFor({ state: 'visible', timeout: 2500 });
-
-      const started =
-        (await tryClickIfVisible(
-          'Start guided tutorial',
-          page.locator('div.TourTipButtonsHolder button.TourTipButton.TourTipNextButton', { hasText: /^Start$/i }).first()
-        )) || (await tryClickIfVisible('Start guided tutorial', page.getByRole('button', { name: /^Start$/i }).first()));
-
-      if (started) {
-        await tryClickIfVisible('Close tutorial after start', page.getByRole('button', { name: /^×$/ }).first());
+      await page.locator('#TourTipDisabledArea').waitFor({ state: 'attached', timeout: 3000 });
+    } catch { /* tutorial didn't appear */ }
+    await page.evaluate(() => {
+      const win = window as any;
+      if (win.jQuery?.tourTip?.close) {
+        win.jQuery.tourTip.close();
       }
-    } catch {
-      // Tutorial popup was not visible.
-    }
+      const canvas = document.getElementById('TourTipDisabledArea');
+      if (canvas) canvas.remove();
+      // Also close any Popup Maker popup (pum-close)
+      document.querySelectorAll<HTMLElement>('.pum-close, .popmake-close').forEach(el => el.click());
+    });
   };
 
   page.on('console', (msg) => {
@@ -214,8 +213,198 @@ test('visual walkthrough and telemetry capture', async ({ page }) => {
     contentType: 'application/json'
   });
 
+  fs.writeFileSync('artifacts/report.html', buildReport(telemetry), 'utf8');
+
   if (STRICT_TELEMETRY) {
     expect(telemetry.failedRequests, 'Detected failed network requests').toEqual([]);
     expect(telemetry.consoleIssues, 'Detected console errors/warnings').toEqual([]);
   }
 });
+
+// ---------------------------------------------------------------------------
+// HTML report builder
+// ---------------------------------------------------------------------------
+
+type Telemetry = {
+  profileRequested: string;
+  profileResolved: string;
+  profileFile: string | null;
+  targetUrl: string;
+  visited: string[];
+  interactions: Array<{ step: string; url: string; screenshotPath: string }>;
+  consoleIssues: string[];
+  failedRequests: string[];
+};
+
+const ANALYTICS_HOSTS = [
+  'google-analytics.com', 'analytics.google.com', 'googletagmanager.com',
+  'doubleclick.net', 'facebook.com/tr', 'hotjar.com', 'segment.com',
+  'mixpanel.com', 'amplitude.com', 'clarity.ms', 'polyfill.io',
+];
+
+function classifyRequest(req: string): 'analytics' | 'media' | 'real' {
+  const lower = req.toLowerCase();
+  if (ANALYTICS_HOSTS.some(h => lower.includes(h))) return 'analytics';
+  if (/\.(mp4|webm|ogg|mp3|wav|m3u8)(\s|$|::)/.test(lower)) return 'media';
+  return 'real';
+}
+
+function buildReport(t: Telemetry): string {
+  const now = new Date().toLocaleString();
+  const errors = t.consoleIssues.filter(i => i.startsWith('[error]'));
+  const warnings = t.consoleIssues.filter(i => i.startsWith('[warning]'));
+
+  const realFailed = t.failedRequests.filter(r => classifyRequest(r) === 'real');
+  const mediaFailed = t.failedRequests.filter(r => classifyRequest(r) === 'media');
+  const analyticsFailed = t.failedRequests.filter(r => classifyRequest(r) === 'analytics');
+
+  const severity = realFailed.length > 0 || errors.length > 0 ? 'FAIL' : warnings.length > 0 || mediaFailed.length > 0 ? 'WARN' : 'PASS';
+  const severityColor = severity === 'FAIL' ? '#ef4444' : severity === 'WARN' ? '#f59e0b' : '#22c55e';
+
+  const badgeHtml = (count: number, label: string, color: string) =>
+    `<div class="badge" style="border-color:${color}"><span class="badge-num" style="color:${color}">${count}</span><span class="badge-label">${label}</span></div>`;
+
+  const issueRows = (items: string[], cls: string) =>
+    items.map(i => `<div class="issue-row ${cls}">${escHtml(i)}</div>`).join('');
+
+  const reqRows = (items: string[], cls: string, label: string) => {
+    if (items.length === 0) return '';
+    return `<div class="req-group">
+      <div class="req-group-label ${cls}-label">${label} (${items.length})</div>
+      ${items.map(r => `<div class="req-row ${cls}">${escHtml(r)}</div>`).join('')}
+    </div>`;
+  };
+
+  const stepCards = t.interactions.map((s, i) => {
+    const imgPath = s.screenshotPath.replace(/^artifacts\//, '');
+    return `<div class="step-card">
+      <div class="step-num">${String(i + 1).padStart(2, '0')}</div>
+      <div class="step-body">
+        <div class="step-title">${escHtml(s.step)}</div>
+        <div class="step-url">${escHtml(s.url)}</div>
+        <img class="step-img" src="${imgPath}" alt="${escHtml(s.step)}" loading="lazy" onclick="openLightbox(this.src)">
+      </div>
+    </div>`;
+  }).join('');
+
+  const visitedList = t.visited.map(u => `<li><a href="${escHtml(u)}" target="_blank">${escHtml(u)}</a></li>`).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bug Report — ${escHtml(t.targetUrl)}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  a { color: #60a5fa; }
+  header { background: #1e293b; border-bottom: 1px solid #334155; padding: 1.5rem 2rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+  .header-icon { font-size: 2rem; }
+  .header-text h1 { font-size: 1.1rem; font-weight: 700; color: #f1f5f9; }
+  .header-text .url { font-size: 0.85rem; color: #94a3b8; word-break: break-all; }
+  .header-text .meta { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+  .verdict { margin-left: auto; font-size: 0.9rem; font-weight: 700; padding: 0.4rem 1rem; border-radius: 9999px; border: 2px solid ${severityColor}; color: ${severityColor}; }
+  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+  section { margin-bottom: 2.5rem; }
+  h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #1e293b; }
+  .badges { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .badge { background: #1e293b; border: 1px solid; border-radius: 0.75rem; padding: 1rem 1.5rem; min-width: 120px; text-align: center; }
+  .badge-num { display: block; font-size: 2rem; font-weight: 800; line-height: 1; }
+  .badge-label { display: block; font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; }
+  .issue-row { font-size: 0.78rem; font-family: monospace; padding: 0.4rem 0.75rem; border-radius: 0.25rem; margin-bottom: 0.3rem; word-break: break-all; }
+  .issue-row.error { background: #450a0a; color: #fca5a5; }
+  .issue-row.warning { background: #451a03; color: #fcd34d; }
+  .req-group { margin-bottom: 1rem; }
+  .req-group-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+  .req-group-label.real-label { color: #ef4444; }
+  .req-group-label.media-label { color: #f59e0b; }
+  .req-group-label.analytics-label { color: #64748b; }
+  .req-row { font-size: 0.72rem; font-family: monospace; padding: 0.35rem 0.75rem; border-radius: 0.25rem; margin-bottom: 0.25rem; word-break: break-all; }
+  .req-row.real { background: #450a0a; color: #fca5a5; }
+  .req-row.media { background: #1c1917; color: #d6b090; }
+  .req-row.analytics { background: #0f172a; color: #475569; }
+  .visited-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+  .visited-list li { font-size: 0.82rem; }
+  .step-card { display: flex; gap: 1rem; background: #1e293b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
+  .step-num { font-size: 0.75rem; font-weight: 700; color: #475569; min-width: 2rem; padding-top: 0.1rem; }
+  .step-body { flex: 1; min-width: 0; }
+  .step-title { font-size: 0.9rem; font-weight: 600; color: #e2e8f0; margin-bottom: 0.2rem; }
+  .step-url { font-size: 0.72rem; color: #60a5fa; margin-bottom: 0.75rem; word-break: break-all; }
+  .step-img { width: 100%; max-width: 800px; border-radius: 0.375rem; cursor: zoom-in; border: 1px solid #334155; display: block; }
+  .empty { color: #475569; font-size: 0.85rem; font-style: italic; }
+  #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 9999; align-items: center; justify-content: center; cursor: zoom-out; }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 95vw; max-height: 95vh; border-radius: 0.5rem; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-icon">🔍</div>
+  <div class="header-text">
+    <h1>Bug Hunter Report</h1>
+    <div class="url">${escHtml(t.targetUrl)}</div>
+    <div class="meta">Generated ${now} &nbsp;·&nbsp; Profile: ${escHtml(t.profileResolved)}${t.profileFile ? ` (${escHtml(t.profileFile)})` : ''}</div>
+  </div>
+  <div class="verdict">${severity}</div>
+</header>
+
+<main>
+  <section>
+    <h2>Summary</h2>
+    <div class="badges">
+      ${badgeHtml(t.visited.length, 'Pages visited', '#60a5fa')}
+      ${badgeHtml(t.interactions.length, 'Steps captured', '#818cf8')}
+      ${badgeHtml(errors.length, 'Console errors', '#ef4444')}
+      ${badgeHtml(warnings.length, 'Warnings', '#f59e0b')}
+      ${badgeHtml(realFailed.length, 'Failed requests', '#ef4444')}
+      ${badgeHtml(mediaFailed.length, 'Media errors', '#f59e0b')}
+    </div>
+  </section>
+
+  <section>
+    <h2>Pages Visited (${t.visited.length})</h2>
+    ${t.visited.length > 0 ? `<ul class="visited-list">${visitedList}</ul>` : '<div class="empty">None recorded</div>'}
+  </section>
+
+  <section>
+    <h2>Console Issues (${t.consoleIssues.length})</h2>
+    ${t.consoleIssues.length === 0
+      ? '<div class="empty">No console errors or warnings</div>'
+      : issueRows(errors, 'error') + issueRows(warnings, 'warning')}
+  </section>
+
+  <section>
+    <h2>Failed Requests (${t.failedRequests.length})</h2>
+    ${t.failedRequests.length === 0
+      ? '<div class="empty">No failed requests</div>'
+      : reqRows(realFailed, 'real', 'Real failures') +
+        reqRows(mediaFailed, 'media', 'Media / video') +
+        reqRows(analyticsFailed, 'analytics', 'Analytics / tracking (expected)')}
+  </section>
+
+  <section>
+    <h2>Step-by-step Walkthrough (${t.interactions.length} steps)</h2>
+    ${t.interactions.length === 0 ? '<div class="empty">No steps recorded</div>' : stepCards}
+  </section>
+</main>
+
+<div id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" src="" alt=""></div>
+
+<script>
+  function openLightbox(src) {
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('open');
+  }
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+</script>
+</body>
+</html>`;
+}
+
+function escHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

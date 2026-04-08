@@ -15,7 +15,10 @@
     "hunter:report": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode report",
     "academy": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode quick -Profile academybugs -ProfileFile profiles/academybugs.json",
     "academy:ui": "powershell -ExecutionPolicy Bypass -File ./scripts/bug-hunter.ps1 -Mode ui -Profile academybugs -ProfileFile profiles/academybugs.json",
-    "serve:report": "powershell -ExecutionPolicy Bypass -File ./scripts/serve-report.ps1"
+    "cart": "playwright test tests/cart-checkout.spec.ts --headed",
+    "cart:ui": "playwright test tests/cart-checkout.spec.ts --ui",
+    "serve:report": "powershell -ExecutionPolicy Bypass -File ./scripts/serve-report.ps1",
+    "serve": "node scripts/server.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

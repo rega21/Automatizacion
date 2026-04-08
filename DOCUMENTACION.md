@@ -49,38 +49,56 @@ npm run test:ui
 
 Abre el Playwright Test Runner con controles paso a paso.
 
-### Opción 4: Abrir servidor local
+### Opción 4: Servidor web interactivo (NUEVO)
 
-Si necesitas ver el reporte de nuevo sin ejecutar un escaneo:
+Inicia un servidor local con interfaz para escanear cualquier URL sin tocar la terminal:
+
+```powershell
+npm run serve
+```
+
+Abre `http://localhost:3000` automáticamente. Desde ahí podés:
+- Ver el último reporte generado
+- Escribir cualquier URL en la barra inferior y lanzar un nuevo escaneo
+- Ver el output del test en tiempo real mientras corre
+- El reporte se recarga solo al terminar
+
+### Opción 5: Abrir servidor de reporte estático
+
+Si solo querés ver el último reporte sin lanzar nuevos escaneos:
 
 ```powershell
 npm run serve:report
 ```
 
-Abre `http://localhost:8765/report.html` automáticamente.
-
 ## 📊 Qué se reporta
 
-El reporte visual muestra:
+El reporte visual (`artifacts/report.html`) se genera automáticamente al final de cada test y muestra:
 
-| Métrica | Descripción |
-|---------|-------------|
-| **Pasos Capturados** | Número total de interacciones registradas |
-| **Errores de Consola** | Warnings y errors detectados en la consola del navegador |
-| **Requests Fallidas** | Llamadas HTTP que no completaron exitosamente |
+| Sección | Contenido |
+|---------|-----------|
+| **Summary** | Cards con conteos: páginas visitadas, pasos, errores, warnings, requests fallidas, media errors |
+| **Pages Visited** | Lista clickeable de todas las URLs recorridas |
+| **Console Issues** | Errores (rojo) y warnings (amarillo) capturados de la consola del navegador |
+| **Failed Requests** | Requests fallidas categorizadas en tres grupos |
+| **Step-by-step Walkthrough** | Cada paso con screenshot a pantalla completa (click para ampliar) |
 
-### Dentro del recorrido:
+### Categorización de requests fallidas
 
-Cada paso captura:
-- **Screenshot completo** de cómo se veía la página
-- **Nombre de la acción** (ej: "Open Partido tab", "Close menu with Escape")
-- **URL donde ocurrió** (ruta relativa)
-- **Click para ampliar** cualquier imagen
+El reporte distingue automáticamente:
 
-### Secciones adicionales:
+| Categoría | Color | Descripción |
+|-----------|-------|-------------|
+| **Real failures** | Rojo | Recursos propios del sitio que fallaron — bugs reales |
+| **Media / video** | Amarillo | Archivos mp4, webm, etc. — fallos de contenido multimedia |
+| **Analytics / tracking** | Gris tenue | Google Analytics, GTM, Hotjar, etc. — esperado en entorno de test |
 
-- **Errores de Consola**: Lista de todos los `console.error()` y `console.warn()` capturados
-- **Requests Fallidas**: URLs que no pudieron cargarse con motivo específico
+### Badge de severidad
+
+El reporte muestra un badge **PASS / WARN / FAIL** en el encabezado:
+- `FAIL` — hay errores de consola o requests reales fallidas
+- `WARN` — solo warnings o errores de media
+- `PASS` — sin issues detectados
 
 ## ⚙️ Configuración Avanzada
 
@@ -183,28 +201,34 @@ Significa que la solicitud fue abortada (cancelada). Posibles causas:
 
 **Acción**: Revisar logs del servidor o red.
 
-## 🛠️ Archivos modificados/creados
+## 🛠️ Archivos del proyecto
 
 | Archivo | Propósito |
 |---------|-----------|
-| `.github/agents/bug-hunter.agent.md` | Agente personalizado de Copilot |
-| `tests/site-walk.spec.ts` | Test que recorre la UI con Playwright |
-| `playwright.config.ts` | Configuración de Playwright (trazas, ui, etc) |
+| `tests/site-walk.spec.ts` | Test principal: recorre la UI, captura screenshots y genera el reporte HTML |
+| `tests/cart-checkout.spec.ts` | Test de flujo carrito → checkout en AcademyBugs |
+| `tests/site-profiles.ts` | Tipos y lógica para cargar perfiles de sitio |
+| `profiles/academybugs.json` | Perfil para academybugs.com (qué navegar y verificar) |
+| `profiles/new-site.example.json` | Template para crear un perfil de sitio nuevo |
+| `playwright.config.ts` | Configuración de Playwright (trazas, modo headless, etc.) |
 | `tsconfig.json` | TypeScript config para el proyecto |
 | `package.json` | Scripts npm y dependencias |
-| `artifacts/report.html` | Reporte visual generado |
-| `scripts/bug-hunter.ps1` | Script PowerShell que orquesta todo |
-| `scripts/serve-report.ps1` | Script para servir el reporte locally |
-| `scripts/open-report.ps1` | Script helper para abrir reportes |
+| `scripts/bug-hunter.ps1` | Script PowerShell que orquesta los modos (quick, ui, report) |
+| `scripts/server.js` | Servidor web interactivo — sirve el reporte y lanza escaneos desde el browser |
+| `scripts/serve-report.ps1` | Script para servir el reporte estático localmente |
+| `artifacts/report.html` | Reporte visual generado (se sobreescribe en cada escaneo) |
+| `artifacts/telemetry.json` | Datos brutos del último escaneo en JSON |
+| `artifacts/steps/` | Screenshots de cada paso del recorrido |
 
 ## 📚 Notas técnicas
 
 - **Lenguaje del test**: TypeScript
 - **Framework**: Playwright Test (`@playwright/test`)
 - **Configuración**: `playwright.config.ts` + `tsconfig.json`
-- **Servidor local**: `npx http-server` (sin dependencias adicionales)
-- **Orquestación**: PowerShell scripts en Windows
-- **Generación de reportes**: HTML estático + JavaScript vanilla (sin frameworks)
+- **Servidor web interactivo**: Node.js puro (`scripts/server.js`) — sin dependencias adicionales
+- **Orquestación CLI**: PowerShell scripts en Windows
+- **Generación de reportes**: HTML estático generado desde el test — JavaScript vanilla, sin frameworks
+- **Detección de perfil automática**: al escanear vía servidor, detecta `academybugs.com` y usa el perfil correspondiente; para cualquier otra URL usa el perfil `generic` (abre la página sin navegación específica)
 
 ## 🎯 Próximos pasos sugeridos
 
@@ -221,8 +245,8 @@ Si quieres expandir el sistema:
 ### El reporte no carga en el navegador
 
 ```powershell
-npm run serve:report
-# Abre http://localhost:8765/report.html manualmente
+npm run serve
+# Abre http://localhost:3000 — sirve el reporte y permite lanzar nuevos escaneos
 ```
 
 ### Playwright no encuentra un elemento
@@ -241,20 +265,15 @@ $env:ACTION_DELAY_MS='2000'
 npm run hunter:quick
 ```
 
-### Error: "Python not found"
+### El servidor interactivo no responde
 
-El servidor local usa `npx http-server`, no depende de Python. Si no funciona:
+Verificar que el puerto 3000 esté libre:
 
 ```powershell
-npx --yes http-server ./artifacts --port 8765 --open
+npm run serve
+# Si el puerto está ocupado, matar el proceso que lo usa y reiniciar
 ```
-
-## 📞 Contacto / Soporte
-
-Este sistema fue creado como solución personalizada para detección de bugs en `https://fobalfoca5.vercel.app/`.
-
-Para cambios, contacta al equipo de automatización.
 
 ---
 
-**Última actualización**: 11 de Marzo de 2026
+**Última actualización**: 8 de Abril de 2026

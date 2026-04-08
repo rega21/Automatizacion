@@ -36,15 +36,27 @@ The HTML report shows:
 - **Click to zoom** any screenshot to inspect details
 - **Organized layout** similar to Cypress Test Runner
 
-### Accessing the report
+### Servidor interactivo (recomendado)
 
-The report opens automatically after `npm run hunter:quick`, but if you need to re-open it:
+Para escanear cualquier URL desde el browser sin usar la terminal:
+
+```powershell
+npm run serve
+```
+
+1. Se abre `http://localhost:3000` automáticamente
+2. Escribís cualquier URL en la barra de abajo
+3. Click en **Run Scan** o `Enter`
+4. Ves el progreso en tiempo real
+5. El reporte se recarga solo al terminar
+
+> La terminal tiene que quedar abierta mientras usás el servidor.
+
+### Ver el último reporte sin escanear
 
 ```powershell
 npm run serve:report
 ```
-
-This starts a local server at `http://localhost:8765/report.html` and opens it in your browser.
 
 ## 1) Install dependencies
 
